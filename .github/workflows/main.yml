@@ -1,0 +1,69 @@
+   name: CI-CD Smart Mobility Pipeline
+
+   on:
+     push:
+       branches: [main, dev-scraping]
+     pull_request:
+       branches: [main]
+     workflow_dispatch:
+     schedule:
+       - cron: '0 */6 * * *'
+
+   jobs:
+     continuous-integration:
+       runs-on: ubuntu-latest
+       steps:
+         - name: Checkout code
+           uses: actions/checkout@v4
+
+         - name: Setup Python
+           uses: actions/setup-python@v5
+           with:
+             python-version: '3.11'
+
+         - name: Install dependencies
+           run: pip install -r requirements.txt
+
+         - name: Test syntax & run scraper
+           run: python scrape_traffic.py
+
+     continuous-deployment:
+       needs: continuous-integration
+       if: github.ref == 'refs/heads/main'
+       runs-on: ubuntu-latest
+       permissions:
+         id-token: write
+         contents: read
+       steps:
+         - name: Checkout code
+           uses: actions/checkout@v4
+
+         - name: Setup Python
+           uses: actions/setup-python@v5
+           with:
+             python-version: '3.11'
+
+         - name: Install dependencies
+           run: pip install -r requirements.txt
+
+         - name: Run Python Scraping
+           env:
+            KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+            KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+           run: python scrape_traffic.py
+
+         - name: Login to Azure via OIDC
+           uses: azure/login@v2
+           with:
+             client-id: ${{ vars.AZURE_CLIENT_ID }}
+             tenant-id: ${{ vars.AZURE_TENANT_ID }}
+             subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+         - name: Upload CSV to Azure Blob Storage
+           run: |
+             az storage blob upload-batch \
+               --account-name ${{ vars.AZURE_STORAGE_ACCOUNT }} \
+               --destination ${{ vars.AZURE_STORAGE_CONTAINER }} \
+               --source data_output \
+               --auth-mode login \
+               --overwrite
